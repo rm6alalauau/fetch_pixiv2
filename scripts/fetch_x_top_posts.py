@@ -14,7 +14,7 @@ AUTH_JSON_CONTENT = os.getenv('AUTH_JSON_CONTENT')
 SEARCH_KEYWORD = "#ブラダス2"
 TARGET_URL = f"https://x.com/search?q={urllib.parse.quote(SEARCH_KEYWORD)}&src=typed_query&f=top"
 MAX_POSTS = 20
-SCROLL_ATTEMPTS = 5 # 【新設定】定義要向下滾動幾次來載入更多內容
+SCROLL_ATTEMPTS = 15 # 【新設定】定義要向下滾動幾次來載入更多內容
 
 def main():
     if not all([APPS_SCRIPT_URL, X_APPS_SCRIPT_SECRET, AUTH_JSON_CONTENT]):
