@@ -14,17 +14,16 @@ AUTH_JSON_CONTENT = os.getenv('AUTH_JSON_CONTENT')
 SEARCH_KEYWORD = "#ブラダス2"
 TARGET_URL = f"https://x.com/search?q={urllib.parse.quote(SEARCH_KEYWORD)}&src=typed_query&f=top"
 MAX_POSTS = 20
-MAX_SCROLL_ATTEMPTS = 60 # 保持較高的滾動次數
+MAX_SCROLL_ATTEMPTS = 30 # 設定一個滾動上限，防止無限迴圈
 
-# --- 【新】輔助函式，專門用來解析當前可見的推文 ---
+# --- 輔助函式 (維持不變，它已經很好了) ---
 def parse_and_add_tweets(page: Page, all_posts: list, seen_tweet_links: set):
-    """解析當前頁面上所有可見的、不重複的推文，並將其加入 all_posts 列表。"""
     new_tweets_found = 0
     tweet_elements = page.locator('article[data-testid="tweet"]').all()
 
     for tweet in tweet_elements:
         if len(all_posts) >= MAX_POSTS:
-            break # 如果已達標，提前結束
+            break
 
         post_data = {}
         try:
@@ -84,37 +83,44 @@ def main():
             print(f"Navigating to: {TARGET_URL}")
             page.goto(TARGET_URL, timeout=90000)
             page.wait_for_selector('article[data-testid="tweet"]', timeout=60000)
-            print("Initial page loaded.")
+            
+            # 【核心修改 1】給頁面一個「沉澱」的時間，確保初始內容完全穩定
+            print("Initial page loaded. Giving it a moment to settle...")
+            time.sleep(5) 
 
             all_posts = []
             seen_tweet_links = set()
-            
-            # 【核心修改 1】進行首次抓取，捕獲熱度最高的內容
-            print("\n--- Performing Initial Parse (Before Scrolling) ---")
-            initial_found_count = parse_and_add_tweets(page, all_posts, seen_tweet_links)
-            print(f"  - Found {initial_found_count} initial tweets.")
-
-            # 【核心修改 2】如果數量不夠，再開始滾動
             scroll_attempts_left = MAX_SCROLL_ATTEMPTS
-            if len(all_posts) < MAX_POSTS:
-                print("\n--- Starting Scroll-and-Parse Loop ---")
+            
+            print("\n--- Starting intelligent scroll-and-parse loop ---")
+            while len(all_posts) < MAX_POSTS and scroll_attempts_left > 0:
+                print(f"Current state: {len(all_posts)}/{MAX_POSTS} posts. Parsing visible tweets...")
                 
-                while len(all_posts) < MAX_POSTS and scroll_attempts_left > 0:
-                    print(f"Current state: {len(all_posts)}/{MAX_POSTS} posts. Scrolling down... ({scroll_attempts_left} attempts left)")
-                    
-                    # 1. 滾動
-                    page.evaluate("window.scrollBy(0, window.innerHeight)") # 每次滾動一個螢幕的高度
-                    scroll_attempts_left -= 1
-                    time.sleep(3)
+                # 1. 解析當前所有可見的推文
+                newly_found_count = parse_and_add_tweets(page, all_posts, seen_tweet_links)
+                print(f"  - Found {newly_found_count} new tweets in this iteration.")
 
-                    # 2. 抓取新載入的內容
-                    newly_found_count = parse_and_add_tweets(page, all_posts, seen_tweet_links)
-                    print(f"  - Found {newly_found_count} new tweets in this iteration.")
+                if len(all_posts) >= MAX_POSTS:
+                    print(f"Target of {MAX_POSTS} posts reached. Finishing.")
+                    break
+                
+                # 2. 【核心修改 2】精準滾動到最後一則已找到的推文，而不是盲目滾動
+                last_tweet_on_page = page.locator('article[data-testid="tweet"]').last
+                if last_tweet_on_page.count() > 0:
+                    print("  - Scrolling to the last found tweet to load more...")
+                    last_tweet_on_page.scroll_into_view_if_needed()
+                    scroll_attempts_left -= 1
+                    time.sleep(3) # 等待新內容載入
+                else:
+                    # 如果頁面上找不到任何推文（不太可能發生，但作為保護），則停止
+                    print("  - No more tweets found on page. Stopping.")
+                    break
 
             # 迴圈結束後，進行總結
             print(f"\n✅ Finished scraping process. Total unique tweets found: {len(all_posts)}")
 
             if all_posts:
+                # 後續邏輯不變
                 payload = {"secret": X_APPS_SCRIPT_SECRET, "data": all_posts}
                 headers = {"Content-Type": "application/json"}
                 print(f"Posting {len(all_posts)} posts to Apps Script...")
