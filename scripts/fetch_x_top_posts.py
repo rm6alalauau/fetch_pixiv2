@@ -14,9 +14,9 @@ AUTH_JSON_CONTENT = os.getenv('AUTH_JSON_CONTENT')
 SEARCH_KEYWORD = "#ブラダス2"
 TARGET_URL = f"https://x.com/search?q={urllib.parse.quote(SEARCH_KEYWORD)}&src=typed_query&f=top"
 MAX_POSTS = 20
-MAX_SCROLL_ATTEMPTS = 30 # 設定一個滾動上限，防止無限迴圈
+MAX_SCROLL_ATTEMPTS = 30
 
-# --- 輔助函式 (維持不變，它已經很好了) ---
+# --- 【最終版】輔助函式，能夠同時處理圖片和影片 ---
 def parse_and_add_tweets(page: Page, all_posts: list, seen_tweet_links: set):
     new_tweets_found = 0
     tweet_elements = page.locator('article[data-testid="tweet"]').all()
@@ -45,10 +45,20 @@ def parse_and_add_tweets(page: Page, all_posts: list, seen_tweet_links: set):
             author_handle = handle_element.inner_text(timeout=5000) if handle_element.count() > 0 else ""
             post_data["AuthorProfile"] = f"https://x.com/{author_handle.replace('@', '')}"
             
+            # 【核心修改】智能圖片/影片預覽圖抓取邏輯
             image_url = ""
-            image_locator = tweet.locator('div[data-testid="tweetPhoto"] img').first
-            if image_locator.count() > 0:
-                image_url = image_locator.get_attribute('src', timeout=5000)
+            # 1. 首先，嘗試尋找常規圖片
+            photo_locator = tweet.locator('div[data-testid="tweetPhoto"] img').first
+            if photo_locator.count() > 0:
+                image_url = photo_locator.get_attribute('src', timeout=5000)
+            else:
+                # 2. 如果找不到常規圖片，再嘗試尋找影片的預覽圖
+                # 影片預覽圖通常在一個不同的容器裡
+                video_thumb_locator = tweet.locator('div[data-testid="videoPlayer"] img[src*="pbs.twimg.com"]').first
+                if video_thumb_locator.count() > 0:
+                    image_url = video_thumb_locator.get_attribute('src', timeout=5000)
+                    print(f"  - INFO: Found a video thumbnail for post: {post_link}")
+            
             post_data["Image"] = image_url
             post_data["Thumbnail"] = image_url
 
@@ -65,7 +75,7 @@ def parse_and_add_tweets(page: Page, all_posts: list, seen_tweet_links: set):
             
     return new_tweets_found
 
-# --- 主函式重構 ---
+# --- 主函式 (維持不變) ---
 def main():
     if not all([APPS_SCRIPT_URL, X_APPS_SCRIPT_SECRET, AUTH_JSON_CONTENT]):
         print("❌ Missing required environment variables. Aborting.")
@@ -84,7 +94,6 @@ def main():
             page.goto(TARGET_URL, timeout=90000)
             page.wait_for_selector('article[data-testid="tweet"]', timeout=60000)
             
-            # 【核心修改 1】給頁面一個「沉澱」的時間，確保初始內容完全穩定
             print("Initial page loaded. Giving it a moment to settle...")
             time.sleep(5) 
 
@@ -96,7 +105,6 @@ def main():
             while len(all_posts) < MAX_POSTS and scroll_attempts_left > 0:
                 print(f"Current state: {len(all_posts)}/{MAX_POSTS} posts. Parsing visible tweets...")
                 
-                # 1. 解析當前所有可見的推文
                 newly_found_count = parse_and_add_tweets(page, all_posts, seen_tweet_links)
                 print(f"  - Found {newly_found_count} new tweets in this iteration.")
 
@@ -104,23 +112,19 @@ def main():
                     print(f"Target of {MAX_POSTS} posts reached. Finishing.")
                     break
                 
-                # 2. 【核心修改 2】精準滾動到最後一則已找到的推文，而不是盲目滾動
                 last_tweet_on_page = page.locator('article[data-testid="tweet"]').last
                 if last_tweet_on_page.count() > 0:
                     print("  - Scrolling to the last found tweet to load more...")
                     last_tweet_on_page.scroll_into_view_if_needed()
                     scroll_attempts_left -= 1
-                    time.sleep(3) # 等待新內容載入
+                    time.sleep(3)
                 else:
-                    # 如果頁面上找不到任何推文（不太可能發生，但作為保護），則停止
                     print("  - No more tweets found on page. Stopping.")
                     break
 
-            # 迴圈結束後，進行總結
             print(f"\n✅ Finished scraping process. Total unique tweets found: {len(all_posts)}")
 
             if all_posts:
-                # 後續邏輯不變
                 payload = {"secret": X_APPS_SCRIPT_SECRET, "data": all_posts}
                 headers = {"Content-Type": "application/json"}
                 print(f"Posting {len(all_posts)} posts to Apps Script...")
