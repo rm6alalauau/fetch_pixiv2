@@ -28,7 +28,7 @@ jobs:
 
       - name: Run Scraper
         env:
-          APPS_SCRIPT_URL: ${{ secrets.APPS_SCRIPT_URL }}
+          APPS_SCRIPT_URL: ${{ secrets.APPS_SCRIPT_URL2 }}
           X_APPS_SCRIPT_SECRET: ${{ secrets.X_APPS_SCRIPT_SECRET }}
           AUTH_JSON_CONTENT: ${{ secrets.AUTH_JSON_CONTENT }}
         run: python scripts/fetch_x_top_posts.py
